@@ -31,7 +31,11 @@ static NSString *const CHANNEL_NAME = @"open_file";
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
-    if ([@"open_file" isEqualToString:call.method]) {
+    if ([@"close_file" isEqualToString:call.method]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(900 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            [self->_documentController dismissPreviewAnimated:YES];
+        });
+    }else if ([@"open_file" isEqualToString:call.method]) {
         _result = result;
         NSString *msg = call.arguments[@"file_path"];
         if(msg==nil){

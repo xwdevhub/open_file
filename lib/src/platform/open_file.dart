@@ -11,6 +11,7 @@ class OpenFile {
   static const MethodChannel _channel = const MethodChannel('open_file');
 
   OpenFile._();
+
   ///[filePath] On web you need to pass the file name to determine the file type
   ///[linuxDesktopName] like 'xdg'/'gnome'
   static Future<OpenResult> open(String? filePath,
@@ -55,5 +56,14 @@ class OpenFile {
     final _result = await _channel.invokeMethod('open_file', map);
     final resultMap = json.decode(_result) as Map<String, dynamic>;
     return OpenResult.fromJson(resultMap);
+  }
+
+  static Future close() async {
+    if (!Platform.isIOS) {
+      return;
+    }
+
+    Map<String, String?> map = {};
+    await _channel.invokeMethod('close_file', map);
   }
 }
