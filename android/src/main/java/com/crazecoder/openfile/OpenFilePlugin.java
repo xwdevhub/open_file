@@ -186,7 +186,9 @@ public class OpenFilePlugin implements MethodCallHandler
         int type = 0;
         String message = "done";
         try {
-            activity.startActivity(intent);
+            // activity.startActivity(intent);
+             Intent chooserIntent = Intent.createChooser(intent, "选择应用打开文件");
+            activity.startActivity(chooserIntent);
         } catch (ActivityNotFoundException e) {
             type = -1;
             message = "No APP found to open this file。";
