@@ -2,7 +2,9 @@ package com.crazecoder.openfile;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -32,8 +34,16 @@ import io.flutter.plugin.common.PluginRegistry;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.util.Base64;
 
 
 /**
@@ -107,10 +117,151 @@ public class OpenFilePlugin implements MethodCallHandler
                 return;
             }
             startActivity();
+        } else if (call.method.equals("show_open_file_apps")) {
+            this.result = result;
+            filePath = call.argument("file_path");
+            if (call.hasArgument("type") && call.argument("type") != null) {
+                mimeType = call.argument("type");
+            } else {
+                mimeType = getFileMimeType(filePath);
+            }
+            if (!isFileAvailable()) {
+                return;
+            }
+            if (pathRequiresPermission()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isExternalStoragePublicMedia(mimeType)) {
+                        if (isImage(mimeType) && !hasPermission(Manifest.permission.READ_MEDIA_IMAGES) && !Environment.isExternalStorageManager()) {
+                            result(-3, "Permission denied: " + Manifest.permission.READ_MEDIA_IMAGES);
+                            return;
+                        }
+                        if (isVideo(mimeType) && !hasPermission(Manifest.permission.READ_MEDIA_VIDEO) && !Environment.isExternalStorageManager()) {
+                            result(-3, "Permission denied: " + Manifest.permission.READ_MEDIA_VIDEO);
+                            return;
+                        }
+                        if (isAudio(mimeType) && !hasPermission(Manifest.permission.READ_MEDIA_AUDIO) && !Environment.isExternalStorageManager()) {
+                            result(-3, "Permission denied: " + Manifest.permission.READ_MEDIA_AUDIO);
+                            return;
+                        }
+                    } else if (!Environment.isExternalStorageManager()) {
+                        result(-3, "Permission denied: " + Manifest.permission.MANAGE_EXTERNAL_STORAGE);
+                        return;
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                        result(-3, "Permission denied: " + Manifest.permission.READ_EXTERNAL_STORAGE);
+                        return;
+                    }
+
+                }
+            }
+            // Build intent for querying resolving activities
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addCategory(Intent.CATEGORY_DEFAULT);
+            Uri uri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                uri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileProvider.com.crazecoder.openfile", new File(filePath));
+            } else {
+                uri = Uri.fromFile(new File(filePath));
+            }
+            intent.setDataAndType(uri, mimeType);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+            List<ResolveInfo> resolveInfoList;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                resolveInfoList = activity.getPackageManager().queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY));
+            } else {
+                resolveInfoList = activity.getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            }
+
+            if (resolveInfoList == null || resolveInfoList.size() == 0) {
+                result(-1, "No APP found to open this file。");
+                return;
+            }
+
+            // Build apps list to return to Flutter
+            List<Map<String, Object>> apps = new ArrayList<>();
+            for (ResolveInfo resolveInfo : resolveInfoList) {
+                Map<String, Object> app = new HashMap<>();
+                String packageName = resolveInfo.activityInfo.packageName;
+                String activityName = resolveInfo.activityInfo.name;
+                CharSequence label = resolveInfo.loadLabel(activity.getPackageManager());
+                Drawable icon = resolveInfo.loadIcon(activity.getPackageManager());
+                String iconBase64 = drawableToBase64(icon);
+                app.put("package_name", packageName);
+                app.put("activity_name", activityName);
+                app.put("label", label != null ? label.toString() : packageName);
+                app.put("icon", iconBase64);
+                apps.add(app);
+            }
+            result.success(JsonUtil.listToJson(apps));
+            isResultSubmitted = true;
+            return;
+        } else if (call.method.equals("open_file_with")) {
+            this.result = result;
+            filePath = call.argument("file_path");
+            String packageName = call.argument("package_name");
+            String activityName = call.argument("activity_name");
+            if (!isFileAvailable()) {
+                return;
+            }
+            // create intent to open with specific app
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addCategory(Intent.CATEGORY_DEFAULT);
+            Uri uri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                uri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileProvider.com.crazecoder.openfile", new File(filePath));
+            } else {
+                uri = Uri.fromFile(new File(filePath));
+            }
+            intent.setDataAndType(uri, mimeType != null ? mimeType : getFileMimeType(filePath));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+            try {
+                if (activityName != null && !activityName.isEmpty()) {
+                    intent.setComponent(new ComponentName(packageName, activityName));
+                } else if (packageName != null && !packageName.isEmpty()) {
+                    intent.setPackage(packageName);
+                }
+
+                // Grant permission to the target package
+                if (packageName != null && !packageName.isEmpty()) {
+                    activity.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                }
+
+                activity.startActivity(intent);
+                result(0, "done");
+                return;
+            } catch (ActivityNotFoundException e) {
+                result(-1, "No APP found to open this file。");
+                return;
+            } catch (Exception e) {
+                result(-4, "File opened incorrectly。");
+                return;
+            }
         } else {
             result.notImplemented();
             isResultSubmitted = true;
         }
+    }
+
+    private String drawableToBase64(Drawable drawable) {
+        if (drawable == null) return null;
+        Bitmap bitmap;
+        if (drawable instanceof BitmapDrawable) {
+            bitmap = ((BitmapDrawable) drawable).getBitmap();
+        } else {
+            int width = drawable.getIntrinsicWidth() > 0 ? drawable.getIntrinsicWidth() : 1;
+            int height = drawable.getIntrinsicHeight() > 0 ? drawable.getIntrinsicHeight() : 1;
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+            drawable.draw(canvas);
+        }
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+        byte[] bytes = baos.toByteArray();
+        return Base64.encodeToString(bytes, Base64.NO_WRAP);
     }
 
 
@@ -186,8 +337,7 @@ public class OpenFilePlugin implements MethodCallHandler
         int type = 0;
         String message = "done";
         try {
-            // activity.startActivity(intent);
-             Intent chooserIntent = Intent.createChooser(intent, "选择应用打开文件");
+            Intent chooserIntent = Intent.createChooser(intent, "选择应用打开文件");
             activity.startActivity(chooserIntent);
         } catch (ActivityNotFoundException e) {
             type = -1;

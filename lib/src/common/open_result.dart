@@ -23,6 +23,25 @@ class OpenResult {
   }
 }
 
+class SupportAppInfo {
+  String packageName;
+  String activityName;
+  String label;
+  String iconBase64;
+
+  SupportAppInfo(
+      {this.packageName = "",
+      this.activityName = "",
+      this.label = "",
+      this.iconBase64 = ""});
+
+  SupportAppInfo.fromJson(Map<String, dynamic> json)
+      : packageName = json['package_name'],
+        activityName = json['activity_name'],
+        label = json['label'],
+        iconBase64 = json['icon'];
+}
+
 enum ResultType {
   done,
   fileNotFound,

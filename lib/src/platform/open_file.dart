@@ -66,4 +66,51 @@ class OpenFile {
     Map<String, String?> map = {};
     await _channel.invokeMethod('close_file', map);
   }
+
+  // 仅支持安卓
+  static Future<List<SupportAppInfo>> showOpenFileApps(
+    String? filePath, {
+    String? type,
+    String? uti,
+    String linuxDesktopName = "xdg",
+    bool linuxByProcess = false,
+    Uint8List? webData,
+  }) async {
+    assert(filePath != null);
+    if (!Platform.isAndroid) {
+      return [];
+    }
+
+    Map<String, String?> map = {
+      "file_path": filePath!,
+      "type": type,
+      "uti": uti,
+    };
+    final _result = await _channel.invokeMethod('show_open_file_apps', map);
+    final resultMap = json.decode(_result) as List;
+    return resultMap.map((e) => SupportAppInfo.fromJson(e)).toList();
+  }
+
+  // 仅支持安卓
+  static Future<OpenResult> openFileWith(
+    String filePath,
+    String packageName,
+    String activityName,
+  ) async {
+    if (!Platform.isAndroid) {
+      return OpenResult(
+        type: ResultType.error,
+        message: "This operating system is not currently supported",
+      );
+    }
+
+    Map<String, String?> map = {
+      "file_path": filePath,
+      "package_name": packageName,
+      "activity_name": activityName,
+    };
+    final _result = await _channel.invokeMethod('open_file_with', map);
+    final resultMap = json.decode(_result) as Map<String, dynamic>;
+    return OpenResult.fromJson(resultMap);
+  }
 }
